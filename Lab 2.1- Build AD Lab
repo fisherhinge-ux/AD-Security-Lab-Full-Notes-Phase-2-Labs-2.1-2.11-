@@ -1,0 +1,33 @@
+Objective
+
+Build a functional Active Directory home lab environment from scratch — a Domain Controller, a domain-joined Windows 10 client, and an attacker machine — that supports all subsequent Phase 2 labs.
+
+Environment:
+
+Kali Linux (attacker)
+Windows Server 2022 (promoted to DC, domain: redteamlab.local)
+Windows 10 (domain-joined client)
+Oracle VirtualBox, Host-Only Adapter (vboxnet0, 192.168.56.0/24)
+What Was Built
+Windows Server 2022 installed and configured as a Domain Controller
+Active Directory Domain Services (AD DS) role installed and promoted
+Domain redteamlab.local created
+DNS configured on the DC (required for domain functionality)
+Windows 10 client joined to the domain
+Lab user accounts created: Administrator, jdoe, svc_backup, asrep
+Static IPs assigned: DC .101, Client .15, Kali .1 (or host IP)
+
+Key Concepts:
+
+A Domain Controller is a server running AD DS that authenticates users, enforces policy, and manages the domain database (NTDS.dit)
+DNS is mandatory for AD — clients find the DC by querying DNS SRV records (_ldap._tcp.dc._msdcs.<domain>)
+Domain joining creates a computer account in AD and establishes a machine password shared between the workstation and the DC
+The Administrator account created during DC promotion is the built-in Domain Admin
+Key Lessons
+AD DNS must point to the DC itself — external DNS breaks domain functionality
+Computer accounts (MACHINE$) are created automatically on domain join
+The DC is the single most valuable target in any AD environment — it holds NTDS.dit, the krbtgt key, and all secrets
+
+Interview Explanation:
+
+"I built a self-contained Active Directory lab using VirtualBox with a Windows Server 2022 Domain Controller, a Windows 10 domain-joined client, and a Kali Linux attacker on an isolated host-only network. This gave me a realistic enterprise-style environment to practice every phase of AD offensive security."
