@@ -1,0 +1,58 @@
+Objective;
+
+  Relay a captured NTLM authentication attempt live to a different target system,
+  achieving authentication as the victim without ever cracking their password.
+
+Why It Works:
+
+  NTLM authentication is a challenge-response protocol.
+  When a victim authenticates to an attacker-controlled resource,
+  the attacker can forward that authentication handshake in real-time to a third system.
+  The third system challenges the attacker, who forwards the challenge back to the victim,
+  gets their response, and forwards that back — acting as a transparent man-in-the-middle.
+  The result: the attacker is authenticated to the third system as the victim.
+
+  Critical requirement: the relay destination must have SMB signing disabled or not enforced.
+  SMB signing requires every message to carry a cryptographic signature derived from the session key —
+  which the relay can't forge without knowing the actual secret.
+
+Commands:
+bash
+
+ # Step 1: Disable SMB/HTTP in Responder (we want to capture, not respond)
+ # Edit /etc/responder/Responder.conf: SMB = Off, HTTP = Off
+
+ # Step 2: Start Responder for poisoning only
+   sudo responder -I eth1 -wdv
+
+ # Step 3: Start ntlmrelayx targeting the Ubuntu host (.105)
+   impacket-ntlmrelayx -tf targets.txt -smb2support
+
+  Findings:
+    . jdoe's authentication successfully relayed to .105 (Ubuntu/Samba host)
+    . Relay succeeded — confirmed by ntlmrelayx output showing successful authentication
+    . jdoe's actual permissions on .105 determined what the relay could access (guest-level in this case)
+
+Critical Lesson: Relay Success ≠ Privilege Granted
+
+  Relay success means you authenticated as jdoe to the target — jdoe's real permissions on that target still apply.
+  If jdoe is a guest, you're a guest. The relay gives you jdoe's identity, not admin rights.
+
+ Detection:
+   . Unusual authentication sources in Security event logs (4624/4625)
+   . NTLM authentications from unexpected hosts
+   . SMB signing enforcement eliminates this attack entirely
+   
+ Key Lessons:
+   .  NetNTLMv2 can be relayed live even when it can't be cracked —
+      two separate attack paths from the same captured hash
+   .  SMB signing is the definitive mitigation — not optional in any serious environment
+   .  Relay works best against targets without signing;
+      verify signing status before selecting relay targets (netexec smb <target> --gen-relay-list)
+
+Interview Explanation:
+
+ "NTLM relay attacks forward a victim's live authentication handshake to a third system in real time,
+  authenticating as the victim without ever knowing their password.
+  I used Responder for poisoning and impacket-ntlmrelayx to relay jdoe's captured authentication to the Ubuntu host,
+  achieving a successful relay. The key constraint is that the relay destination must not enforce SMB signing." 
