@@ -1,0 +1,54 @@
+Objective:
+
+ Exploit disabled Kerberos pre-authentication to obtain offline-crackable AS-REP hashes
+ without any domain credentials.
+
+Why It Works:
+
+ Kerberos pre-authentication requires a client to prove knowledge of their password before the KDC will issue an AS-REP.
+ If pre-auth is disabled on an account, the KDC will issue an AS-REP to anyone who asks — no credential needed.
+ The AS-REP contains data encrypted with the target account's own key (password-derived),
+ which can be cracked offline.
+
+Key difference from Kerberoasting:
+
+ . Kerberoasting targets the TGS exchange — requires a valid authenticated session first
+ . AS-REP Roasting targets the AS exchange — requires zero credentials if pre-auth is disabled
+
+Commands:
+bash 
+
+ # Find and capture AS-REP hashes (no credentials needed if pre-auth disabled)
+  impacket-GetNPUsers redteamlab.local/ -dc-ip 192.168.56.101 \
+  -usersfile users.txt -no-pass -format john
+
+ # Crack the hash
+   john --format=krb5asrep --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+ # or
+   hashcat -m 18200 hash.txt /usr/share/wordlists/rockyou.txt
+
+
+Findings
+
+  . asrep — pre-authentication disabled
+  . AS-REP hash captured
+  . Password cracked: Password123
+
+Detection:
+
+ . Event ID 4768 (AS-REQ) with pre-auth type 0x0 (no pre-auth) — stands out
+   against normal 4768 events which show pre-auth type 0x12 or 0x17
+
+Key Lessons:
+
+ Pre-authentication exists specifically to prevent this attack — disabling it is a serious misconfiguration
+ AS-REP Roasting requires zero domain credentials — just network access to the DC on port 88
+ Hash format differs from Kerberoasting: $krb5asrep$ vs $krb5tgs$ — different hashcat modes (18200 vs 13100)
+
+Interview Explanation:
+
+ "AS-REP Roasting exploits disabled Kerberos pre-authentication.
+  When pre-auth is off, the KDC issues an AS-REP to any requester without verifying their identity
+  and that response contains data encrypted with the account's own password hash.
+  I captured the AS-REP for the asrep account using impacket-GetNPUsers with no domain credentials,
+  then cracked it offline recovering Password123."
