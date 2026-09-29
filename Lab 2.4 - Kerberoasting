@@ -1,0 +1,101 @@
+Objective:
+
+ Exploit Kerberos TGS ticket issuance to obtain offline-crackable hashes
+ from service accounts with SPNs set, without any elevated privileges.
+
+Environment:
+
+ . Attacker: Kali Linux
+ . Target: redteamlab.local DC
+ . Target account: svc_backup (SPN: HTTP/iis.redteamlab.local)
+ . Starting access: valid low-privilege domain credentials
+
+Why It Works:
+
+ The KDC will issue a TGS to any authenticated domain user for any SPN that exists —
+ with no authorization check on whether the requester is actually allowed to use that service.
+ The TGS is encrypted with the service account's own password-derived key.
+ Because the key is password-derived (not random), an attacker who captures the TGS can attempt to crack it offline
+ trying candidate passwords until one produces matching encryption, revealing the plaintext password.
+ No network contact with the DC is needed after the initial TGS request, and no account lockout is possible
+ during offline cracking.
+
+Commands:
+
+ bash 
+ # Find Kerberoastable accounts and request TGS hashes
+ impacket-GetUserSPNs redteamlab.local/jdoe:Password123! \
+  -dc-ip 192.168.56.101 -request
+
+ # Crack the captured hash
+ john --format=krb5tgs --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+ # or
+ hashcat -m 13100 hash.txt /usr/share/wordlists/rockyou.txt
+
+Findings:
+
+ . svc_backup — SPN: HTTP/iis.redteamlab.local
+ . TGS hash captured successfully
+ . Password cracked: Password123Findings
+
+
+What Makes a Good Kerberoasting Target:
+
+Two independent factors — both must be considered:
+
+ 1.Privilege of the account — what can it access if cracked?
+   (check BloodHound for group memberships, local admin rights, ACL paths)
+ 2. Crackability of the password — service accounts are often set once and never rotated,
+    making them vulnerable to dictionary attacks
+
+Real-World Scenario:
+
+ Service accounts in real organizations are notorious for weak, never-rotated passwords
+ set by a developer years ago and forgotten. Kerberoasting is low-noise
+ (one legitimate TGS request per target account), requires only a valid domain user credential,
+ and produces an offline-crackable artifact — making it one of the most commonly abused techniques in
+ real engagements.
+
+Detection:
+
+   . Event ID 4769 (Kerberos Service Ticket Request) with encryption type 0x17 (RC4) — modern environments prefer AES, so RC4 TGS requests stand out
+   . High volume of 4769 events in short time from one account (mass Kerberoasting)
+
+Key Lessons;
+
+    . Kerberos does not check authorization before issuing a TGS — it only checks authentication
+    
+    . RC4 vs AES encryption on TGS tickets is a detection signal — use AES-encrypted requests where possible for stealth
+    
+    . A cracked service account with no privileges is still a finding — document it, don't manufacture a path that doesn't exist
+
+Interview Explanation:
+
+"Kerberoasting exploits the fact that any authenticated domain user can request a Kerberos service ticket
+ for any SPN-set account, and that ticket is encrypted with the service account's password-derived key.
+ I used impacket-GetUserSPNs to request TGS hashes for svc_backup, then cracked the hash offline with hashcat,
+ recovering the password Password123 without triggering any account lockout or requiring elevated privileges."
+
+What Makes a Good Kerberoasting Target:
+
+Two independent factors — both must be considered:
+
+1.Privilege of the account — what can it access if cracked? (check BloodHound for group memberships,
+  local admin rights, ACL paths)
+2.Crackability of the password — service accounts are often set once and never rotated, making them vulnerable to
+  dictionary attacks
+
+Real-World Scenario
+
+Service accounts in real organizations are notorious for weak, never-rotated passwords set by a developer years ago and forgotten. Kerberoasting is low-noise (one legitimate TGS request per target account), requires only a valid domain user credential, and produces an offline-crackable artifact — making it one of the most commonly abused techniques in real engagements.
+
+Detection
+Event ID 4769 (Kerberos Service Ticket Request) with encryption type 0x17 (RC4) — modern environments prefer AES, so RC4 TGS requests stand out
+High volume of 4769 events in short time from one account (mass Kerberoasting)
+Key Lessons
+Kerberos does not check authorization before issuing a TGS — it only checks authentication
+RC4 vs AES encryption on TGS tickets is a detection signal — use AES-encrypted requests where possible for stealth
+A cracked service account with no privileges is still a finding — document it, don't manufacture a path that doesn't exist
+Interview Explanation
+
+"Kerberoasting exploits the fact that any authenticated domain user can request a Kerberos service ticket for any SPN-set account, and that ticket is encrypted with the service account's password-derived key. I used impacket-GetUserSPNs to request TGS hashes for svc_backup, then cracked the hash offline with hashcat, recovering the password Password123 without triggering any account lockout or requiring elevated privileges."
