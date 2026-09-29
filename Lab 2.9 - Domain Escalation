@@ -1,0 +1,55 @@
+Objective:
+
+  Escalate from a compromised service account to Domain Admin by exploiting Unconstrained Delegation,
+  and understand ACL abuse chains as an alternative escalation path.
+
+Unconstrained Delegation — How It Works
+
+  When Unconstrained Delegation is enabled on a service account, the KDC embeds a full copy of the authenticating
+  user's TGT inside the TGS it issues for that service. This TGT copy is delivered to the service's host and
+  cached in LSASS. If an attacker compromises that host, they can extract cached TGTs (including Domain Admin TGTs
+  if a DA authenticated to the service) using Mimikatz and reuse them.
+  
+  Victim (DA) authenticates to service → KDC embeds DA's TGT in TGS
+   → TGT cached in service host LSASS
+   → Attacker extracts TGT via Mimikatz
+   → Attacker reuses TGT as Domain Admin
+
+  Lab Configuration
+   . svc_backup — Unconstrained Delegation enabled
+   . IIS running on .15 under svc_backup identity
+   . SPN: HTTP/iis.redteamlab.local
+   . Goal: trigger a Domain Admin (Administrator) to authenticate to the IIS service, then extract the cached TGT
+
+ACL Abuse Chains (Conceptual Coverage)
+Key ACL rights and their abuse paths:
+
+ Right	                      Abuse
+___________________________________________________________________________________________________
+ GenericAll	                  Full control — reset password, modify any attribute, add to groups
+___________________________________________________________________________________________________
+ GenericWrite	                Write most attributes — e.g. add SPN to make account Kerberoastable
+___________________________________________________________________________________________________
+ WriteOwner	                  Take ownership first, then grant yourself GenericAll
+___________________________________________________________________________________________________
+ WriteDACL	                  Modify the object's DACL — grant yourself any right
+___________________________________________________________________________________________________
+ ForceChangePassword	        Reset account password without knowing current password
+___________________________________________________________________________________________________
+
+Attack direction:
+          low-to-high only matters offensively. Find paths where your compromised account has any
+          of these rights over a higher-privilege object.
+
+Key Lessons:
+  . Unconstrained Delegation is a legacy feature — any service account with it enabled is a high-value target
+  . The attack requires triggering a privileged user to authenticate to the service (SpoolSample/PrinterBug in real engagements)
+  . ACL abuse chains often span multiple hops in BloodHound — follow the full path, not just the first edge
+  . Lab infrastructure issues (IIS/DNS) terminated the hands-on portion; technique marked conceptually complete
+
+ Interview Explanation:
+
+"Unconstrained Delegation causes the KDC to embed a full copy of an authenticating user's TGT inside service tickets
+ which gets cached in the service host's LSASS. An attacker who compromises that host can extract cached TGTs including
+ Domain Admin tickets and reuse them. I also covered ACL abuse chains where misconfigured AD permissions
+ (GenericAll, WriteDACL, WriteOwner) create privilege escalation paths between objects."
