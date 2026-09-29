@@ -1,0 +1,84 @@
+What is BloodHound?
+
+BloodHound is a graph-based Active Directory attack path analysis tool. It collects AD data via a collector
+(ingestion), stores it in a Neo4j graph database, and visualizes relationships between AD objects as edges —
+letting you find multi-hop attack paths that would be invisible in flat LDAP queries.
+
+Lab Setup (BloodHound CE)
+bash 
+  # Start BloodHound CE via Docker on Kali
+    docker-compose up -d
+  # Access at http://localhost:8080
+
+Data Collection
+bash
+    # Option 1: bloodhound-python collector
+        bloodhound-python -u jdoe -p 'Password123!' \
+       -d redteamlab.local \
+       -dc WIN-56JEHJD0RI3.redteamlab.local \
+       -c All
+
+# Option 2: netexec with BloodHound flag
+  netexec ldap 192.168.56.101 -u jdoe -p 'Password123!' \
+  --bloodhound -c All
+
+Upload the generated JSON files to BloodHound CE at http://localhost:8080.
+
+Key Edge Types and What They Mean
+
+Edge	                         Meaning	                                       Abuse
+_________________________________________________________________________________________________________________
+MemberOf	                     Account is member of group	                     Context only
+_________________________________________________________________________________________________________________
+GenericAll	                   Full control over object	                       Reset password, modify attributes,
+                                                                               add to groups
+__________________________________________________________________________________________________________________
+GenericWrite	                 Write most non-protected                        Add SPN (Kerberoasting),modify logon
+                               attributes                                      scripts
+___________________________________________________________________________________________________________________
+WriteOwner	                   Can change object owner	                       Take ownership → grant self GenericAll
+___________________________________________________________________________________________________________________
+WriteDACL	                     Can modify object DACL	                         Grant self any right
+___________________________________________________________________________________________________________________
+ForceChangePassword            Can reset password	                             Immediate account takeover
+___________________________________________________________________________________________________________________
+GetChanges + 	                 DCSync rights	                                 Dump entire domain credential 
+GetChangeAll                                                                   database
+____________________________________________________________________________________________________________________
+HasSession	                  User has active session on computer	             Credential theft via LSASS
+____________________________________________________________________________________________________________________
+AdminTo	                      Account has local admin on computer	             Remote code execution, LSASS dump
+____________________________________________________________________________________________________________________
+DCSync	                      Computed: has both GetChanges rights	           Can run DCSync
+____________________________________________________________________________________________________________________
+
+
+Critical Distinction
+
+. High-to-low control = normal AD hierarchy (not a finding) Domain Admins → GenericAll → normal user = expected,
+  how AD is designed
+
+ . Low-to-high control = real attack path Normal user → GenericAll → Domain Admin = investigate immediately
+
+What Was Explored in redteamlab.local:
+  . jdoe: AdminCount:True (former privileged account), sole member of HR-Team, 0 outbound object control
+    (no attack paths out), inbound control from normal DA hierarchy only
+  . svc_backup: SPN set (Kerberoastable), Unconstrained Delegation enabled, no useful outbound control —
+    dead end for lateral movement, but used as persistence account in Lab 2.11
+  . asrep: Pre-auth disabled (AS-REP Roastable), no useful outbound control — dead end
+
+Key Lessons:
+  . BloodHound shows the full graph including multi-hop paths — always run shortest-path queries,
+    not just direct edges
+  . AdminCount:True is a breadcrumb — it means SDProp has touched this account, implying past membership
+    in a protected group
+  . A dead-end node in BloodHound is a legitimate finding on its own — document it
+  . Re-ingest BloodHound data after making changes to confirm new edges appear (e.g. after AdminSDHolder write)
+  . BloodHound CE requires Docker; the collector (bloodhound-python) runs separately from Kali
+
+Queries Used:
+  . "Find all Domain Admins"
+  . "Shortest path to Domain Admins from owned principals"
+  . "Find principals with DCSync rights"
+  . "Find computers with Unconstrained Delegation"
+  .  Direct node inspection: jdoe, svc_backup, asrep
