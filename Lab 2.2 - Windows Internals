@@ -1,0 +1,35 @@
+Objective
+
+Understand the core Windows internal components that underpin Active Directory attacks — processes, services, LSASS, the registry, authentication flow, and how credentials are stored and used.
+
+Key Concepts:
+
+LSASS (Local Security Authority Subsystem Service): The process responsible for enforcing security policy and handling authentication on Windows. Stores credential material in memory (NTLM hashes, Kerberos tickets, sometimes plaintext passwords depending on WDigest configuration). Primary target for credential dumping tools like Mimikatz.
+
+SAM Database: Stores local account password hashes on Windows. Located at C:\Windows\System32\config\SAM. Locked by the OS while running — requires VSS or SYSTEM access to read offline.
+
+NTDS.dit: The Active Directory database file on Domain Controllers. Stores all domain objects including every user's NTLM hash and Kerberos keys. Located at C:\Windows\NTDS\NTDS.dit. Locked by the ESE engine while AD DS is running.
+
+Registry: Hierarchical database storing OS and application configuration. Key hives: HKLM (system-wide), HKCU (current user), HKCR, HKU. Backed by physical files in C:\Windows\System32\config\ but accessed via the Registry API, not as regular files.
+
+Windows Authentication Flow (Kerberos):
+
+User enters credentials → LSASS initiates AS-REQ to KDC
+KDC returns TGT (encrypted with krbtgt key) → stored in LSASS memory
+Client sends TGT in TGS-REQ to request service tickets
+KDC issues TGS (encrypted with target service's key)
+Client presents TGS to target service → service decrypts and grants access
+
+Tokens: After authentication, Windows creates an access token representing the user's identity and group memberships. Every process runs under a token. Token impersonation/theft is a key post-exploitation technique.
+
+Services: Background processes managed by the Service Control Manager (SCM). Run under configured service accounts. Misconfigured service permissions are a common local privilege escalation vector.
+
+Key Lessons:
+
+LSASS is the single most important process to understand for credential attacks — it holds everything
+NTDS.dit and SAM are both locked while the OS runs — Shadow Volume Copy is the workaround
+Understanding authentication flow is mandatory before attacking it — you can't exploit what you don't understand
+
+Interview Explanation:
+
+"Windows Internals lab covered the core components that make AD attacks possible: LSASS as the credential store in memory, NTDS.dit as the domain credential database, the registry as a configuration attack surface, and the full Kerberos authentication flow from AS-REQ through TGS to service access."
