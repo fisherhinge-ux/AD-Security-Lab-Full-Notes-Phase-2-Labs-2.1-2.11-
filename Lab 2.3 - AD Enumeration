@@ -1,0 +1,68 @@
+Objective:
+
+Enumerate an Active Directory environment from a low-privilege authenticated position —
+mapping users, groups, computers, SPNs, and trust relationships to build an attack surface map.
+
+Tools Used:
+
+. impacket-GetADUsers — enumerate domain users
+. impacket-GetUserSPNs — find Kerberoastable accounts (SPN-set)
+. impacket-GetNPUsers — find AS-REP Roastable accounts (pre-auth disabled)
+. netexec (formerly crackmapexec) — SMB/LDAP enumeration
+. nmap — port scanning to identify AD services (88, 389, 445, 135, 3268)
+. BloodHound (see separate BloodHound notes)
+
+Key Ports Identified:
+
+Port	     Service	          Significance
+________________________________________________________________
+53	        DNS	              Domain name resolution, DC locator
+________________________________________________________________
+88	       Kerberos	          Authentication service
+________________________________________________________________
+135	        RPC	              Remote procedure calls
+________________________________________________________________
+139/445	    SMB	              File sharing, lateral movement
+________________________________________________________________
+389	        LDAP	            Directory queries
+________________________________________________________________
+636	        LDAPS	            LDAP over SSL
+________________________________________________________________
+3268	     Global Catalog	    Forest-wide LDAP queries
+________________________________________________________________
+
+Findings from redteamlab.local:
+
+. Domain: redteamlab.local
+. DC: WIN-56JEHJD0RI3 (192.168.56.101)
+. Users: Administrator, jdoe, svc_backup, asrep, john, doe, krbtgt
+. svc_backup — SPN set (HTTP/iis.redteamlab.local) → Kerberoastable
+. asrep — pre-authentication disabled → AS-REP Roastable
+. jdoe — AdminCount:True (possible former privileged account)
+. HR-Team group — jdoe is sole member
+
+Key Concepts:
+
+. SPN (Service Principal Name): a unique identifier linking a service to the account running it.
+  Required for Kerberos service ticket issuance.
+  Any account with an SPN is Kerberoastable by any authenticated domain user.
+. Pre-authentication: the default Kerberos security control that prevents offline
+  cracking of AS-REP responses. Disabling it enables AS-REP Roasting.
+. AdminCount:True: flag set on accounts that are/were members of protected groups.
+  SDProp manages these accounts' ACLs — a breadcrumb of past privilege.
+. LDAP: the protocol used to query AD for objects, attributes, and relationships.
+  The foundation of all AD enumeration.
+
+Key Lessons:
+
+. Enumeration order matters: ports → services → users → groups → SPNs → ACLs → attack paths
+. A "dead end" finding (account with no useful privileges) is still a legitimate, reportable finding — and may become an attack vector at a later phase
+. memberOf LDAP attribute excludes primary group (Domain Users)
+  an empty result does not mean "no access anywhere"
+
+Interview Explanation:
+
+"AD enumeration lab established the full attack surface of the domain from a low-privilege
+position — identifying Kerberoastable and AS-REP Roastable accounts,
+mapping group memberships and SPNs, and identifying the domain's port/service
+footprint before any exploitation began."
