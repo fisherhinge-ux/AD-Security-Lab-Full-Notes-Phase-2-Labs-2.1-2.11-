@@ -1,0 +1,60 @@
+Objective:
+
+  Capture NetNTLMv2 hashes by poisoning fallback name resolution protocols on the local network segment.
+
+Why It Works:
+ 
+  When DNS fails to resolve a hostname, Windows falls back to:
+
+    . LLMNR (Link-Local Multicast Name Resolution) — UDP 5355, multicast
+    . NBT-NS (NetBIOS Name Service) — UDP 137, broadcast
+
+   Both protocols have no authentication — any host on the local segment can respond to these queries.
+   The attacker (Responder) simply answers first, claiming to be the requested host.
+   The victim sends its NetNTLMv2 credential to the attacker in the process of attempting to authenticate.
+
+Commands:
+bash 
+
+ # Start Responder to poison LLMNR/NBT-NS and capture hashes 
+   sudo responder -I eth1 -wdv
+
+Findings:
+
+  . NetNTLMv2 hash captured for jdoe when a failed name resolution occurred on the network
+  . Hash format: jdoe::REDTEAMLAB:<challenge>:<response> — challenge-derived, not directly reusable
+
+Critical Distinction
+ NetNTLMv2 ≠ NTLM hash:
+
+   .  NetNTLMv2 is a challenge-response derived value —
+      it cannot be passed directly to another system (Pass-the-Hash)
+   .  It can be: (1) cracked offline to recover plaintext password, or
+      (2) relayed live to another target if SMB signing is disabled there
+
+Detection;
+
+ . DNS query failures followed by LLMNR/NBT-NS queries visible in network traffic
+ . Unusual hosts responding to multicast/broadcast name queries
+ . Event ID 4648 on the victim (explicit credential use)
+
+Mitigation:
+
+ . Disable LLMNR via Group Policy:
+   Computer Configuration → Administrative Templates → Network → DNS Client → Turn off multicast name resolution
+ . Disable NBT-NS via adapter settings or registry
+ . Enable SMB signing on all hosts
+
+Key Lessons:
+
+ . "First to answer wins" is the entire attack model — no exploit, no vulnerability,
+    just a race condition on an unauthenticated protocol
+ .  Responder must be on the same network segment as the victim to receive broadcasts/multicasts
+ .  Capturing a NetNTLMv2 hash is the start, not the end — cracking or relaying are the actual next steps
+
+Interview Explanation:
+
+ "LLMNR and NBT-NS poisoning exploits the fallback name resolution protocols Windows uses when DNS fails.
+  These protocols have no authentication — any host can claim to be any name. Using Responder,
+  I answered LLMNR/NBT-NS queries on the network and captured jdoe's NetNTLMv2 hash
+  when their machine attempted to resolve a non-existent hostname."
