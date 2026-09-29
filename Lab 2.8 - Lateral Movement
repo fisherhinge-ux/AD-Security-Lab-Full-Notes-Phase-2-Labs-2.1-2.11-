@@ -1,0 +1,46 @@
+Objective:
+
+ Understand and distinguish lateral movement (same privilege level, different machine) from domain escalation
+ (same position, higher privilege), and enumerate attack paths using BloodHound.
+
+Key Distinction:
+  . Lateral movement: using existing credentials/tickets to access other machines at the same privilege level
+  . Domain escalation: using a misconfiguration or vulnerability to gain higher privilege than you currently hold
+
+Both are separate techniques with separate goals. Lateral movement extends access
+across the network; escalation increases the privilege of that access.
+
+ Enumeration Performed:
+   . svc_backup and asrep — fully enumerated via BloodHound and netexec
+   . Both confirmed as dead ends: no local admin rights anywhere, no domain group memberships beyond defaults,
+     no useful ACL paths
+   . BloodHound ingested and reviewed — only jdoe explored in detail at this stage
+
+Dead End = Legitimate Finding
+ A cracked account with no useful access is a real, reportable finding — it tells a client that the account exists
+ with a weak password and has been assessed. It is never acceptable to manufacture a finding or hide a dead end.
+ Document it and move on.
+
+ Tools Used
+ bash
+
+ netexec smb 192.168.56.0/24 -u svc_backup -p Password123
+ 
+ netexec smb 192.168.56.0/24 -u asrep -p Password123
+
+  bloodhound-python -u jdoe -p 'Password123!' -d redteamlab.local \
+  -dc WIN-56JEHJD0RI3.redteamlab.local -c All
+
+
+Key Lessons:
+
+  . Local admin rights and domain group membership are two independent privilege systems — check both separately
+  . High-to-low control in BloodHound (Domain Admins → normal user) = normal AD hierarchy, not a finding
+  . Low-to-high control = real attack path worth investigating
+  . BloodHound shows relationships, not just membership — use shortest-path queries for real attack surface
+
+Interview Explanation:
+
+"Lateral movement lab established the distinction between moving sideways across the network at the same privilege
+ level versus escalating to higher privilege. I enumerated both cracked service accounts via BloodHound and netexec,
+ confirmed they were dead ends with no useful access, and documented them as findings rather than manufacturing paths that didn't exist."
